@@ -1,0 +1,17 @@
+# Игнорируем файлы IDE (IntelliJ IDEA)
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Игнорируем файлы конфигурации
+config.env
+config2.env
+.env
+
+# Игнорируем временные файлы и бинарные файлы
+*.swp
+*.swo
+*.log
+*.out
+

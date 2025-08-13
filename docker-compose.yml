@@ -1,0 +1,80 @@
+services:
+  # Сервис кошелька (основное приложение)
+  wallet:
+    build:
+      context: .  # Сборка из текущей директории
+      dockerfile: gw-currency-wallet/Dockerfile  # Путь к Dockerfile
+    ports:
+      - "8080:8080"  # Проброс порта: хост:контейнер
+    environment:
+      - DB_HOST=postgres  # Хост PostgreSQL (имя сервиса в Docker сети)
+      - DB_PORT=5432      # Порт PostgreSQL
+      - DB_USER=postgres  # Пользователь БД
+      - DB_PASSWORD=${POSTGRES_PASSWORD}  # Пароль из переменных окружения
+      - DB_NAME=${POSTGRES_DB}            # Имя БД из переменных окружения
+      - REDIS_ADDR=redis:6379            # Адрес Redis сервиса
+      - EXCHANGE_SERVICE_ADDR=exchanger:50051  # Адрес сервиса обмена
+    depends_on:  # Зависимости между сервисами
+      postgres:
+        condition: service_healthy  # Ждем готовности PostgreSQL
+      redis:
+        condition: service_healthy  # Ждем готовности Redis
+      exchanger:
+        condition: service_started  # Ждем старта (не обязательно готовности)
+    healthcheck:  # Проверка здоровья сервиса
+      test: [ "CMD-SHELL", "wget --spider http://localhost:8080/health || exit 1" ]
+      interval: 10s  # Проверка каждые 10 секунд
+      timeout: 5s    # Таймаут 5 секунд
+      retries: 3     # Количество попыток
+
+  # Сервис обмена валют (gRPC сервис)
+  exchanger:
+    build:
+      context: .
+      dockerfile: gw-exchanger/Dockerfile
+    ports:
+      - "50051:50051"  # gRPC порт
+    environment:
+      DB_HOST: postgres        # Хост PostgreSQL
+      DB_NAME: exchange_rates  # Имя БД для курсов валют
+    volumes:
+      # Монтируем директорию с миграциями БД
+      - ./gw-exchanger/migrations:/app/migrations
+    depends_on:
+      postgres:
+        condition: service_healthy  # Ждем готовности БД
+
+  # Сервис PostgreSQL (база данных)
+  postgres:
+    image: postgres:15-alpine  # Официальный образ PostgreSQL 15
+    environment:
+      POSTGRES_USER: postgres             # Суперпользователь
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}  # Пароль из .env
+      POSTGRES_DB: ${POSTGRES_DB}         # Основная БД из .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data  # Постоянное хранилище данных
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql  # SQL инициализации
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]  # Проверка готовности
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Сервис Redis (кеширование)
+  redis:
+    image: redis:7-alpine  # Официальный образ Redis 7
+    command: redis-server --save 60 1 --loglevel warning  # Параметры запуска
+    sysctls:
+      - net.core.somaxconn=511  # Настройка максимальных соединений
+    volumes:
+      - redis_data:/data  # Постоянное хранилище для Redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]  # Простая проверка работы
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+# Определение томов для постоянного хранения данных
+volumes:
+  postgres_data:  # Том для данных PostgreSQL
+  redis_data:     # Том для данных Redis
